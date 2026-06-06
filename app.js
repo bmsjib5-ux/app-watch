@@ -31,6 +31,15 @@ const dataLog = []; // { time, type, value }
 const hrHistory = []; // เก็บค่าหัวใจสำหรับวาดกราฟ (สูงสุด 60 จุด)
 const HR_HISTORY_MAX = 60;
 
+// service ที่ขออนุญาตเข้าถึงหลังจับคู่ (ต้องระบุไว้ถึงจะอ่านได้)
+const OPTIONAL_SERVICES = [
+  SERVICES.deviceInfo,
+  SERVICES.battery,
+  SERVICES.heartRate,
+  'generic_access',
+  'generic_attribute',
+];
+
 // --- DOM ---
 const $ = (id) => document.getElementById(id);
 const els = {
@@ -49,12 +58,17 @@ const els = {
   hrChart: $('hrChart'),
   log: $('log'),
   unsupported: $('unsupported'),
+  knownPanel: $('knownPanel'),
+  knownDevices: $('knownDevices'),
 };
 
 // --- ตรวจสอบการรองรับ ---
 if (!navigator.bluetooth) {
   els.unsupported.hidden = false;
   els.connectBtn.disabled = true;
+} else {
+  // โหลดรายการอุปกรณ์ที่เคยจับคู่กับแอปนี้ (ถ้ามี)
+  refreshKnownDevices();
 }
 
 // --- ตัวช่วย ---
@@ -73,7 +87,7 @@ function log(type, message, isEvent = false) {
   els.exportBtn.disabled = dataLog.length === 0;
 }
 
-// --- เชื่อมต่อ ---
+// --- เชื่อมต่อ (เลือกอุปกรณ์ใหม่ผ่านหน้าต่างสแกน) ---
 async function connect() {
   try {
     setStatus('connecting', 'กำลังค้นหาอุปกรณ์...');
@@ -81,40 +95,13 @@ async function connect() {
 
     // แสดงอุปกรณ์ Bluetooth ทั้งหมด (ไม่กรองเฉพาะ Heart Rate/Battery)
     // เพื่อให้นาฬิกาที่ไม่ประกาศ standard service ก็ยังโผล่ในรายการได้
-    device = await navigator.bluetooth.requestDevice({
+    const dev = await navigator.bluetooth.requestDevice({
       acceptAllDevices: true,
-      optionalServices: [
-        SERVICES.deviceInfo,
-        SERVICES.battery,
-        SERVICES.heartRate,
-        'generic_access',
-        'generic_attribute',
-      ],
+      optionalServices: OPTIONAL_SERVICES,
     });
-
-    device.addEventListener('gattserverdisconnected', onDisconnected);
-    els.deviceName.textContent = device.name || '(ไม่มีชื่อ)';
-
-    setStatus('connecting', 'กำลังเชื่อมต่อ...');
-    log('event', `🔗 กำลังเชื่อมต่อกับ "${device.name || device.id}"`, true);
-
-    server = await device.gatt.connect();
-
-    setStatus('connected', `เชื่อมต่อแล้ว: ${device.name || 'อุปกรณ์'}`);
-    log('event', '✅ เชื่อมต่อสำเร็จ', true);
-
-    els.connectBtn.disabled = true;
-    els.disconnectBtn.disabled = false;
-
-    // อ่านข้อมูลแต่ละ service (ไม่ขัดกันถ้าบาง service ไม่มี)
-    await Promise.allSettled([
-      readDeviceInfo(server),
-      subscribeHeartRate(server),
-      readBattery(server),
-    ]);
-
-    // สำรวจ service ทั้งหมดที่อุปกรณ์เปิดให้เข้าถึง
-    await discoverServices(server);
+    await connectToDevice(dev);
+    // หลังจับคู่สำเร็จครั้งแรก อุปกรณ์จะถูกจดจำไว้สำหรับเชื่อมใหม่ภายหลัง
+    await refreshKnownDevices();
   } catch (err) {
     if (err.name === 'NotFoundError') {
       setStatus('disconnected', 'ยกเลิกการเลือกอุปกรณ์');
@@ -124,6 +111,75 @@ async function connect() {
       log('event', `❌ ข้อผิดพลาด: ${err.message}`, true);
     }
     resetButtons();
+  }
+}
+
+// --- เชื่อมต่อกับ BluetoothDevice ที่ระบุ (ใช้ทั้งตอนเลือกใหม่และเชื่อมซ้ำ) ---
+async function connectToDevice(dev) {
+  device = dev;
+  device.addEventListener('gattserverdisconnected', onDisconnected);
+  els.deviceName.textContent = device.name || '(ไม่มีชื่อ)';
+
+  setStatus('connecting', 'กำลังเชื่อมต่อ...');
+  log('event', `🔗 กำลังเชื่อมต่อกับ "${device.name || device.id}"`, true);
+
+  server = await device.gatt.connect();
+
+  setStatus('connected', `เชื่อมต่อแล้ว: ${device.name || 'อุปกรณ์'}`);
+  log('event', '✅ เชื่อมต่อสำเร็จ', true);
+
+  els.connectBtn.disabled = true;
+  els.disconnectBtn.disabled = false;
+
+  // อ่านข้อมูลแต่ละ service (ไม่ขัดกันถ้าบาง service ไม่มี)
+  await Promise.allSettled([
+    readDeviceInfo(server),
+    subscribeHeartRate(server),
+    readBattery(server),
+  ]);
+
+  // สำรวจ service ทั้งหมดที่อุปกรณ์เปิดให้เข้าถึง
+  await discoverServices(server);
+}
+
+// --- แสดงเฉพาะอุปกรณ์ที่เคยจับคู่กับแอปนี้แล้ว (ไม่ต้องสแกนใหม่) ---
+async function refreshKnownDevices() {
+  if (typeof navigator.bluetooth?.getDevices !== 'function') {
+    els.knownPanel.hidden = true;
+    return;
+  }
+  let devices = [];
+  try {
+    devices = await navigator.bluetooth.getDevices();
+  } catch (_) {
+    els.knownPanel.hidden = true;
+    return;
+  }
+  els.knownDevices.innerHTML = '';
+  if (!devices.length) {
+    els.knownPanel.hidden = true;
+    return;
+  }
+  els.knownPanel.hidden = false;
+  for (const dev of devices) {
+    const connected = dev.gatt && dev.gatt.connected;
+    const btn = document.createElement('button');
+    btn.className = 'btn known-item';
+    btn.innerHTML = `<span class="known-dot" data-on="${connected}"></span>${dev.name || '(ไม่มีชื่อ)'}`;
+    btn.title = connected ? 'เชื่อมต่ออยู่' : 'กดเพื่อเชื่อมใหม่';
+    btn.disabled = connected;
+    btn.addEventListener('click', async () => {
+      try {
+        log('event', `🔁 เชื่อมใหม่กับ "${dev.name || dev.id}"`, true);
+        await connectToDevice(dev);
+        await refreshKnownDevices();
+      } catch (err) {
+        setStatus('disconnected', 'เชื่อมใหม่ล้มเหลว');
+        log('event', `❌ เชื่อมใหม่ไม่สำเร็จ: ${err.message} (นาฬิกาอาจอยู่ไกล/ปิด/ถูกเชื่อมที่อื่น)`, true);
+        resetButtons();
+      }
+    });
+    els.knownDevices.appendChild(btn);
   }
 }
 
