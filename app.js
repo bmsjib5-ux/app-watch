@@ -79,12 +79,17 @@ async function connect() {
     setStatus('connecting', 'กำลังค้นหาอุปกรณ์...');
     log('event', '🔍 เปิดหน้าต่างเลือกอุปกรณ์ Bluetooth', true);
 
+    // แสดงอุปกรณ์ Bluetooth ทั้งหมด (ไม่กรองเฉพาะ Heart Rate/Battery)
+    // เพื่อให้นาฬิกาที่ไม่ประกาศ standard service ก็ยังโผล่ในรายการได้
     device = await navigator.bluetooth.requestDevice({
-      filters: [
-        { services: [SERVICES.heartRate] },
-        { services: [SERVICES.battery] },
+      acceptAllDevices: true,
+      optionalServices: [
+        SERVICES.deviceInfo,
+        SERVICES.battery,
+        SERVICES.heartRate,
+        'generic_access',
+        'generic_attribute',
       ],
-      optionalServices: [SERVICES.deviceInfo, SERVICES.battery, SERVICES.heartRate],
     });
 
     device.addEventListener('gattserverdisconnected', onDisconnected);
@@ -107,6 +112,9 @@ async function connect() {
       subscribeHeartRate(server),
       readBattery(server),
     ]);
+
+    // สำรวจ service ทั้งหมดที่อุปกรณ์เปิดให้เข้าถึง
+    await discoverServices(server);
   } catch (err) {
     if (err.name === 'NotFoundError') {
       setStatus('disconnected', 'ยกเลิกการเลือกอุปกรณ์');
@@ -117,6 +125,43 @@ async function connect() {
     }
     resetButtons();
   }
+}
+
+// --- สำรวจ service/characteristic ทั้งหมดที่อุปกรณ์เปิดให้ ---
+async function discoverServices(server) {
+  try {
+    const services = await server.getPrimaryServices();
+    if (!services.length) {
+      log('event', 'ℹ️ อุปกรณ์ไม่เปิดเผย GATT service ใดให้เข้าถึง', true);
+      return;
+    }
+    log('event', `🧭 พบ ${services.length} service ที่เข้าถึงได้:`, true);
+    for (const service of services) {
+      let chars = [];
+      try {
+        chars = await service.getCharacteristics();
+      } catch (_) {
+        /* บาง service อ่าน characteristic ไม่ได้ */
+      }
+      const props = chars
+        .map((c) => shortUuid(c.uuid))
+        .join(', ');
+      log('discovery', `• service ${shortUuid(service.uuid)}${props ? ` → [${props}]` : ''}`);
+    }
+    log(
+      'event',
+      'ℹ️ ถ้าไม่เห็น service มาตรฐาน (180D/180F) แปลว่าอุปกรณ์ใช้โปรโตคอลเฉพาะ — อ่านข้อมูลตรงไม่ได้',
+      true
+    );
+  } catch (err) {
+    log('event', `ℹ️ สำรวจ service ไม่สำเร็จ: ${err.message}`, true);
+  }
+}
+
+// ย่อ UUID มาตรฐาน 128-bit ให้เหลือเลขสั้น (เช่น 0000180d-... → 180d)
+function shortUuid(uuid) {
+  const m = /^0000([0-9a-f]{4})-0000-1000-8000-00805f9b34fb$/.exec(uuid);
+  return m ? `0x${m[1]}` : uuid;
 }
 
 // --- Device Information Service ---
