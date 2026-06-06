@@ -1,0 +1,81 @@
+<!DOCTYPE html>
+<html lang="th">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>App Watch — Smart Watch Data via Web Bluetooth</title>
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body>
+  <main class="app">
+    <header class="header">
+      <h1>⌚ App Watch</h1>
+      <p class="subtitle">เชื่อมต่อข้อมูลกับ Smart Watch ผ่าน Web Bluetooth</p>
+    </header>
+
+    <section class="panel" id="unsupported" hidden>
+      <p class="warn">
+        ⚠️ เบราว์เซอร์นี้ไม่รองรับ Web Bluetooth — กรุณาใช้ <strong>Chrome</strong> หรือ
+        <strong>Edge</strong> บนเดสก์ท็อป หรือ Android (ต้องเปิดผ่าน <code>https://</code> หรือ
+        <code>localhost</code>)
+      </p>
+    </section>
+
+    <section class="panel controls">
+      <div class="status">
+        <span class="dot" id="statusDot" data-state="disconnected"></span>
+        <span id="statusText">ยังไม่ได้เชื่อมต่อ</span>
+      </div>
+      <div class="buttons">
+        <button id="connectBtn" class="btn primary">เชื่อมต่อนาฬิกา</button>
+        <button id="disconnectBtn" class="btn" disabled>ตัดการเชื่อมต่อ</button>
+      </div>
+    </section>
+
+    <section class="grid">
+      <div class="card" id="deviceCard">
+        <h2>อุปกรณ์</h2>
+        <dl class="info">
+          <dt>ชื่อ</dt><dd id="deviceName">—</dd>
+          <dt>ผู้ผลิต</dt><dd id="manufacturer">—</dd>
+          <dt>รุ่น</dt><dd id="modelNumber">—</dd>
+          <dt>เฟิร์มแวร์</dt><dd id="firmware">—</dd>
+        </dl>
+      </div>
+
+      <div class="card metric">
+        <h2>อัตราการเต้นหัวใจ</h2>
+        <div class="big-number">
+          <span id="heartRate">—</span><span class="unit">bpm</span>
+        </div>
+        <canvas id="hrChart" width="320" height="80"></canvas>
+      </div>
+
+      <div class="card metric">
+        <h2>แบตเตอรี่</h2>
+        <div class="big-number">
+          <span id="battery">—</span><span class="unit">%</span>
+        </div>
+        <div class="battery-bar"><div class="battery-fill" id="batteryFill"></div></div>
+      </div>
+    </section>
+
+    <section class="panel">
+      <div class="log-header">
+        <h2>บันทึกข้อมูล (Data Log)</h2>
+        <button id="exportBtn" class="btn small" disabled>ส่งออก CSV</button>
+      </div>
+      <div class="log" id="log"></div>
+    </section>
+
+    <footer class="footer">
+      <p>
+        ใช้มาตรฐาน Bluetooth GATT: Heart Rate (0x180D), Battery (0x180F),
+        Device Information (0x180A)
+      </p>
+    </footer>
+  </main>
+
+  <script src="app.js"></script>
+</body>
+</html>
