@@ -29,6 +29,9 @@ jobs:
 
       - name: Setup Pages
         uses: actions/configure-pages@v5
+        with:
+          # พยายามเปิด GitHub Pages ให้อัตโนมัติถ้ายังไม่ได้เปิด
+          enablement: true
 
       - name: Upload site
         uses: actions/upload-pages-artifact@v3
